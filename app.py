@@ -120,6 +120,16 @@ def obtener_semana_actual(hoy):
     return dias
 
 
+def analizar_semana(df_g, df_l, dias_semana):
+    fechas_str = [d.strftime("%d/%m/%Y") for d in dias_semana]
+    g = df_g[df_g["fecha"].isin(fechas_str)]
+    l = df_l[df_l["fecha"].isin(fechas_str)]
+    comb = pd.concat([g, l], ignore_index=True)
+    if comb.empty:
+        return Counter()
+    return Counter(comb["numero"].tolist())
+
+
 def elegir_inteligente(df_g, df_l, dias_semana, hoy_str, hora):
     fechas_str = [d.strftime("%d/%m/%Y") for d in dias_semana]
 
@@ -175,7 +185,6 @@ def elegir_inteligente(df_g, df_l, dias_semana, hoy_str, hora):
 
 
 def calcular_fijos_dia_v2(df_g, df_l, dias_semana, hoy_str):
-    """Los 3 con mejor score inteligente."""
     fechas_str = [d.strftime("%d/%m/%Y") for d in dias_semana]
     g_sem = df_g[df_g["fecha"].isin(fechas_str)]
     l_sem = df_l[df_l["fecha"].isin(fechas_str)]
@@ -256,6 +265,7 @@ def main():
                 proxima_hora = h + 1
                 break
 
+    # ÚLTIMO RESULTADO
     st.markdown("## 🎯 ÚLTIMO RESULTADO")
 
     g_hoy = df_g[df_g["fecha"] == hoy_str]
@@ -288,6 +298,7 @@ def main():
     st.info(f"📊 Data: {len(df_g) + len(df_l)} sorteos · 🕐 {ahora.strftime('%H:%M')} · Próxima hora en {minutos_restantes} min")
 
     dias_semana = obtener_semana_actual(hoy)
+    conteo_sem = analizar_semana(df_g, df_l, dias_semana)
 
     # FIJOS DEL DÍA V2
     st.markdown("---")
@@ -295,12 +306,11 @@ def main():
     st.caption("Los 3 con mejor patrón")
 
     fijos = calcular_fijos_dia_v2(df_g, df_l, dias_semana, hoy_str)
-    conteo_sem, _ = analizar_semana_v2(df_g, df_l, dias_semana)
-
     for num in fijos:
         veces = conteo_sem.get(num, 0)
         st.success(f"**{fmt_num(num)} {ANIMALITOS_DICT[num]}** — {veces} veces esta semana")
 
+    # PRÓXIMA JUGADA
     st.markdown("---")
     st.markdown("## 🎯 PRÓXIMA JUGADA")
 
@@ -311,8 +321,6 @@ def main():
 
         elegidos, razon = elegir_inteligente(df_g, df_l, dias_semana, hoy_str, proxima_hora)
 
-        g_hoy = df_g[df_g["fecha"] == hoy_str]
-        l_hoy = df_l[df_l["fecha"] == hoy_str]
         repes_hoy = Counter(g_hoy["numero"].tolist() + l_hoy["numero"].tolist())
 
         if not elegidos:
@@ -320,4 +328,78 @@ def main():
         else:
             if len(elegidos) == 1:
                 num = elegidos[0]
-                gastado = " ⚠️ GASTADO"
+                veces = conteo_sem.get(num, 0)
+                gastado = " ⚠️ GASTADO" if repes_hoy.get(num, 0) >= 2 else ""
+                st.success(f"## 🔥 {fmt_num(num)} {ANIMALITOS_DICT[num]}{gastado}\n\n**MUY FUERTE** ({veces} veces esta semana)")
+            elif len(elegidos) == 3:
+                st.warning("### 🎯 3 ANIMALITOS")
+                for num in elegidos:
+                    veces = conteo_sem.get(num, 0)
+                    repes = repes_hoy.get(num, 0)
+                    gastado = f" ⚠️ (ya salió {repes}x hoy)" if repes >= 2 else ""
+                    st.markdown(f"- **{fmt_num(num)} {ANIMALITOS_DICT[num]}** ({veces} veces){gastado}")
+            else:
+                st.info("### 🎯 2 ANIMALITOS")
+                for num in elegidos:
+                    veces = conteo_sem.get(num, 0)
+                    repes = repes_hoy.get(num, 0)
+                    gastado = f" ⚠️ (ya salió {repes}x hoy)" if repes >= 2 else ""
+                    st.markdown(f"- **{fmt_num(num)} {ANIMALITOS_DICT[num]}** ({veces} veces){gastado}")
+
+    # HISTORIAL DE HOY
+    st.markdown("---")
+    st.markdown("## 📊 HISTORIAL DE HOY")
+
+    aciertos_simples = 0
+    total_horas = 0
+
+    for hora in HORAS_RANGO:
+        g_h = g_hoy[g_hoy["hora_num"] == hora] if not g_hoy.empty else pd.DataFrame()
+        l_h = l_hoy[l_hoy["hora_num"] == hora] if not l_hoy.empty else pd.DataFrame()
+
+        if g_h.empty and l_h.empty:
+            continue
+
+        total_horas += 1
+        elegidos, _ = elegir_inteligente(df_g, df_l, dias_semana, hoy_str, hora)
+
+        nums_salidos = set()
+        if not g_h.empty:
+            nums_salidos.add(int(g_h.iloc[0]["numero"]))
+        if not l_h.empty:
+            nums_salidos.add(int(l_h.iloc[0]["numero"]))
+
+        acierto = sum(1 for n in elegidos if n in nums_salidos)
+        if acierto > 0:
+            aciertos_simples += 1
+
+        if acierto == 0:
+            emoji = "❌"
+        elif acierto == 1:
+            emoji = "✅"
+        else:
+            emoji = "✅✅"
+
+        pred_str = " + ".join([f"{fmt_num(n)}" for n in elegidos])
+        salio_str = " · ".join([f"{fmt_num(n)} {ANIMALITOS_DICT[n]}" for n in sorted(nums_salidos)])
+
+        st.write(f"**{emoji} {formatear_hora(hora)}** · Dijo: {pred_str} · Salió: {salio_str}")
+
+    st.markdown("---")
+    st.markdown(f"## 📈 DESEMPEÑO DEL DÍA")
+    st.markdown(f"### ✅ {aciertos_simples} aciertos de {total_horas} horas")
+    if total_horas > 0:
+        pct = aciertos_simples / total_horas * 100
+        st.markdown(f"### 📊 {pct:.1f}% de acierto")
+
+    # VISTA DÍA POR DÍA
+    st.markdown("---")
+    st.markdown("## 📅 ANÁLISIS DÍA POR DÍA")
+    for dia in dias_semana:
+        fecha_str = dia.strftime("%d/%m/%Y")
+        nombre = DIAS[dia.weekday()]
+        mostrar_dia(df_g, df_l, fecha_str, nombre)
+
+
+if __name__ == "__main__":
+    main()
